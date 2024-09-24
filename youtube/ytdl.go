@@ -16,12 +16,19 @@ const YTDLPDownloadFormat = "%(id)s.%(ext)s"
 
 var downloadPath string = path.Join(DownloadDir, YTDLPDownloadFormat)
 
-func DownloadAudio(videoUrl string) (string, error) {
+func parseVideoUrl(videoUrl string) string {
 	_, videoTag, _ := strings.Cut(videoUrl, "?v=")
 	videoTagContainsAmpersand := strings.Contains(videoTag, "&")
+
 	if videoTagContainsAmpersand {
 		videoTag, _, _ = strings.Cut(videoTag, "&")
 	}
+
+	return videoTag
+}
+
+func DownloadAudio(videoUrl string) (string, error) {
+	videoTag := parseVideoUrl(videoUrl)
 
 	audioPath := path.Join(DownloadDir, fmt.Sprintf("%s.%s", videoTag, AudioFormat))
 
