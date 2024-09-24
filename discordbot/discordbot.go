@@ -2,13 +2,13 @@ package discordbot
 
 import (
 	"errors"
-	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/Rmkek/goyt/youtube"
 	"github.com/bwmarrin/dgvoice"
 	"github.com/bwmarrin/discordgo"
+	"go.uber.org/zap"
 )
 
 var RmkID string = "253899307332272128"
@@ -43,14 +43,14 @@ func MessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		// Find the channel that the message came from.
 		c, err := s.State.Channel(m.ChannelID)
 		if err != nil {
-			slog.Error("Couldn't find channel where the message came from", slog.Any("error", err))
+			zap.L().Sugar().Error("Couldn't find channel where the message came from", err)
 			return
 		}
 
 		// Find the guild for that channel.
 		g, err := s.State.Guild(c.GuildID)
 		if err != nil {
-			slog.Error("Couldn't find channel guild", slog.Any("error", err))
+			zap.L().Sugar().Error("Couldn't find channel guild", err)
 			return
 		}
 
@@ -70,19 +70,19 @@ func MessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 				videoUrl, err := parseSoundPlayRequest(m.Content)
 				if err != nil {
-					slog.Error("Error when parsing sound play request", slog.Any("error", err))
+					zap.L().Sugar().Error("Error when parsing sound play request", err)
 					return
 				}
 
 				audioPath, err := youtube.DownloadAudio(videoUrl)
 				if err != nil {
-					slog.Error("Couldn't download video", slog.Any("error", err))
+					zap.L().Sugar().Error("Couldn't download video", err)
 				}
 
 				err = PlaySound(audioPath, s, g.ID, vs.ChannelID)
 
 				if err != nil {
-					slog.Error("Couldn't play sound", slog.Any("error", err))
+					zap.L().Sugar().Error("Couldn't play sound", err)
 				}
 
 				return

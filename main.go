@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"log/slog"
 	"os/signal"
 	"syscall"
 
 	"os"
+
+	"go.uber.org/zap"
 
 	"github.com/Rmkek/goyt/discordbot"
 	"github.com/bwmarrin/discordgo"
@@ -15,13 +15,14 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-	slog.SetDefault(logger)
+	logger := zap.NewExample()
+	defer logger.Sync()
+	undo := zap.ReplaceGlobals(logger)
+	defer undo()
 
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		zap.L().Sugar().Fatal("Error loading .env file")
 	}
 
 	discordBotToken := os.Getenv("DISCORD_BOT_TOKEN")
@@ -30,7 +31,7 @@ func main() {
 	bot, err := discordgo.New(fmt.Sprintf("Bot %s", discordBotToken))
 
 	if err != nil {
-		log.Fatal("Bot session failed to start", err)
+		zap.L().Sugar().Fatal("Bot session failed to start", err)
 	}
 
 	defer bot.Close()
@@ -45,11 +46,11 @@ func main() {
 	// Open the websocket and begin listening.
 	err = bot.Open()
 	if err != nil {
-		fmt.Println("Error opening Discord session: ", err)
+		zap.L().Sugar().Fatal("Error opening Discord session: ", err)
 	}
 
 	// Wait here until CTRL-C or other term signal is received.
-	fmt.Println("GoYT is now running.  Press CTRL-C to exit.")
+	logger.Info("GoYT is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
