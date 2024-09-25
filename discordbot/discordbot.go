@@ -3,7 +3,6 @@ package discordbot
 import (
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/Rmkek/goyt/youtube"
 	"github.com/bwmarrin/dgvoice"
@@ -17,14 +16,18 @@ func Ready(s *discordgo.Session, event *discordgo.Ready) {
 	s.UpdateGameStatus(0, "!goyt")
 }
 
-func parseSoundPlayRequest(msg string) (string, error) {
-	after, found := strings.CutPrefix(msg, "!goyt")
+func parseVideoUrlFromRequest(msg string) (videoUrl string) {
+	return strings.TrimSpace(msg)
+}
+
+func parseBotRequest(botRequest string) (string, error) {
+	after, found := strings.CutPrefix(botRequest, "!goyt")
 
 	if !found {
-		return "", errors.New("no !goyt found in command")
+		return "", errors.New("!goyt missing from request")
 	}
 
-	return strings.TrimSpace(after), nil
+	return after, nil
 }
 
 // This function will be called (due to AddHandler above) every time a new
@@ -39,68 +42,67 @@ func MessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if strings.HasPrefix(m.Content, "!goyt") {
-		// Find the channel that the message came from.
-		c, err := s.State.Channel(m.ChannelID)
-		if err != nil {
-			zap.L().Sugar().Error("Couldn't find channel where the message came from", err)
-			return
-		}
+	botRequest, err := parseBotRequest(m.Content)
+	if err != nil {
+		zap.L().Sugar().Error("Parse bot request error", err)
+		return
+	}
 
-		// Find the guild for that channel.
-		g, err := s.State.Guild(c.GuildID)
-		if err != nil {
-			zap.L().Sugar().Error("Couldn't find channel guild", err)
-			return
-		}
+	// Find the channel that the message came from.
+	c, err := s.State.Channel(m.ChannelID)
+	if err != nil {
+		zap.L().Sugar().Error("Couldn't find channel where the message came from", err)
+		return
+	}
 
-		// Look for the message sender in that guild's current voice states.
-		for _, vs := range g.VoiceStates {
-			if vs.UserID == m.Author.ID {
-				if strings.Contains(m.Content, "stop") {
-					vc, err := s.ChannelVoiceJoin(c.GuildID, vs.ChannelID, false, true)
-					if err != nil {
-						return
-					}
+	// Find the guild for that channel.
+	g, err := s.State.Guild(c.GuildID)
+	if err != nil {
+		zap.L().Sugar().Error("Couldn't find channel guild", err)
+		return
+	}
 
-					vc.Speaking(false)
-					vc.Disconnect()
+	// Look for the message sender in that guild's current voice states.
+	for _, vs := range g.VoiceStates {
+		if vs.UserID == m.Author.ID {
+			if strings.Contains(m.Content, "stop") {
+				vc, err := s.ChannelVoiceJoin(c.GuildID, vs.ChannelID, false, true)
+				if err != nil {
 					return
 				}
 
-				videoUrl, err := parseSoundPlayRequest(m.Content)
-				if err != nil {
-					zap.L().Sugar().Error("Error when parsing sound play request", err)
-					return
-				}
-
-				audioPath, err := youtube.DownloadAudio(videoUrl)
-				if err != nil {
-					zap.L().Sugar().Error("Couldn't download video", err)
-				}
-
-				err = PlaySound(audioPath, s, g.ID, vs.ChannelID)
-
-				if err != nil {
-					zap.L().Sugar().Error("Couldn't play sound", err)
-				}
-
+				vc.Speaking(false)
+				vc.Disconnect()
 				return
 			}
+
+			videoUrl := parseVideoUrlFromRequest(botRequest)
+			audioPath, err := youtube.DownloadAudio(videoUrl)
+			if err != nil {
+				zap.L().Sugar().Error("Couldn't download video", err)
+			}
+
+			err = PlaySound(audioPath, s, g.ID, vs.ChannelID)
+
+			if err != nil {
+				zap.L().Sugar().Error("Couldn't play sound", err)
+			}
+
+			return
 		}
 	}
 }
 
 func PlaySound(soundFile string, s *discordgo.Session, guildID, channelID string) (err error) {
+	zap.L().Sugar().Infoln("VCs:", s.VoiceConnections)
 	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
 	if err != nil {
 		return err
 	}
+	zap.L().Sugar().Infoln("VCs:", s.VoiceConnections)
 
-	time.Sleep(250 * time.Millisecond)
 	vc.Speaking(true)
 	dgvoice.PlayAudioFile(vc, soundFile, make(chan bool))
-	time.Sleep(250 * time.Millisecond)
 	vc.Speaking(false)
 	vc.Disconnect()
 
