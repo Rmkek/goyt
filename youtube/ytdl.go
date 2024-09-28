@@ -10,14 +10,16 @@ import (
 	"go.uber.org/zap"
 )
 
-const AudioFormat = "opus"
-const DownloadDir = "downloads"
-const YTDLPDownloadFormat = "%(id)s.%(ext)s"
+const (
+	AudioFormat         = "opus"
+	DownloadDir         = "downloads"
+	YTDLPDownloadFormat = "%(id)s.%(ext)s"
+)
 
 var downloadPath string = path.Join(DownloadDir, YTDLPDownloadFormat)
 
-func parseVideoUrl(videoUrl string) string {
-	_, videoTag, _ := strings.Cut(videoUrl, "?v=")
+func parseVideoURL(videoURL string) string {
+	_, videoTag, _ := strings.Cut(videoURL, "?v=")
 	videoTagContainsAmpersand := strings.Contains(videoTag, "&")
 
 	if videoTagContainsAmpersand {
@@ -27,8 +29,8 @@ func parseVideoUrl(videoUrl string) string {
 	return videoTag
 }
 
-func DownloadAudio(videoUrl string) (string, error) {
-	videoTag := parseVideoUrl(videoUrl)
+func DownloadAudio(videoURL string) (string, error) {
+	videoTag := parseVideoURL(videoURL)
 
 	audioPath := path.Join(DownloadDir, fmt.Sprintf("%s.%s", videoTag, AudioFormat))
 
@@ -39,9 +41,8 @@ func DownloadAudio(videoUrl string) (string, error) {
 
 	zap.L().Sugar().Info(fmt.Sprintf("Downloading videotag %s", videoTag))
 
-	cmd := exec.Command("yt-dlp", "-x", videoUrl, "-o", downloadPath)
+	cmd := exec.Command("yt-dlp", "-x", videoURL, "-o", downloadPath)
 	_, err := cmd.Output()
-
 	if err != nil {
 		zap.L().Sugar().Error("Error when calling yt-dlp:", err)
 		return "", err

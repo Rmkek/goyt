@@ -2,10 +2,9 @@ package main
 
 import (
 	"fmt"
-	"os/signal"
-	"syscall"
-
+	"log"
 	"os"
+	"os/signal"
 
 	"go.uber.org/zap"
 
@@ -14,44 +13,86 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var bot *discordgo.Session
+
+var (
+	commands = []*discordgo.ApplicationCommand{
+		{
+			Name:        "play",
+			Description: "Plays YouTube video link that you provide",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "youtube-link",
+					Description: "Youtube link",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "stop",
+			Description: "Stops the player",
+		},
+		{
+			Name:        "quit",
+			Description: "Quits the player from voice channel",
+		},
+	}
+
+	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
+		"play": discordbot.PlayHandler,
+		"stop": discordbot.StopHandler,
+		"quit": discordbot.QuitHandler,
+	}
+)
+
+func init() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	discordBotToken := os.Getenv("DISCORD_BOT_TOKEN")
+
+	bot, err = discordgo.New(fmt.Sprintf("Bot %s", discordBotToken))
+	if err != nil {
+		log.Fatal("Bot session failed to start", err)
+	}
+	bot.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
+			h(s, i)
+		}
+	})
+}
+
 func main() {
 	logger := zap.NewExample()
 	defer logger.Sync()
 	undo := zap.ReplaceGlobals(logger)
 	defer undo()
 
-	err := godotenv.Load()
-	if err != nil {
-		zap.L().Sugar().Fatal("Error loading .env file")
+	bot.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
+		zap.L().Sugar().Infof("Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
+	})
+
+	if err := bot.Open(); err != nil {
+		zap.L().Sugar().Fatalf("Cannot open the session: %v", err)
 	}
 
-	discordBotToken := os.Getenv("DISCORD_BOT_TOKEN")
-
-	// Create a new Discord session using the provided bot token.
-	bot, err := discordgo.New(fmt.Sprintf("Bot %s", discordBotToken))
-
-	if err != nil {
-		zap.L().Sugar().Fatal("Bot session failed to start", err)
+	registeredCommands := make([]*discordgo.ApplicationCommand, len(commands))
+	for i, v := range commands {
+		cmd, err := bot.ApplicationCommandCreate(bot.State.User.ID, "", v)
+		if err != nil {
+			zap.L().Sugar().Panicf("Cannot create '%v' command: %v", v.Name, err)
+		}
+		zap.L().Sugar().Infof("Registered '%v' command.", v.Name)
+		registeredCommands[i] = cmd
 	}
 
 	defer bot.Close()
 
-	bot.AddHandler(discordbot.Ready)
-	bot.AddHandler(discordbot.MessageCreate)
-
-	// We need information about guilds (which includes their channels),
-	// messages and voice states.
-	bot.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildVoiceStates
-
-	// Open the websocket and begin listening.
-	err = bot.Open()
-	if err != nil {
-		zap.L().Sugar().Fatal("Error opening Discord session: ", err)
-	}
-
-	// Wait here until CTRL-C or other term signal is received.
-	zap.L().Sugar().Info("GoYT is now running. Press CTRL-C to exit.")
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
-	<-sc
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+	zap.L().Sugar().Info("Press Ctrl+C to exit")
+	<-stop
 }

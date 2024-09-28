@@ -1,8 +1,7 @@
 package discordbot
 
 import (
-	"errors"
-	"strings"
+	"fmt"
 
 	"github.com/Rmkek/goyt/youtube"
 	"github.com/bwmarrin/dgvoice"
@@ -10,101 +9,91 @@ import (
 	"go.uber.org/zap"
 )
 
-var RmkID string = "253899307332272128"
+var stopPlaying chan bool
+var voiceConn *discordgo.VoiceConnection
+var playing bool = false
 
-func Ready(s *discordgo.Session, event *discordgo.Ready) {
-	s.UpdateGameStatus(0, "!goyt")
+func init() {
+	stopPlaying = make(chan bool, 1)
 }
 
-func parseVideoUrlFromRequest(msg string) (videoUrl string) {
-	return strings.TrimSpace(msg)
-}
-
-func parseBotRequest(botRequest string) (string, error) {
-	after, found := strings.CutPrefix(botRequest, "!goyt")
-
-	if !found {
-		return "", errors.New("!goyt missing from request")
-	}
-
-	return after, nil
-}
-
-// This function will be called (due to AddHandler above) every time a new
-// message is created on any channel that the autenticated bot has access to.
-func MessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	// Ignore all messages created by the bot itself
-	if m.Author.ID == s.State.User.ID {
-		return
-	}
-
-	if m.Author.ID != RmkID {
-		return
-	}
-
-	botRequest, err := parseBotRequest(m.Content)
+func playSound(soundFile string, s *discordgo.Session, guildID, channelID string, stop <-chan bool) (err error) {
+	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
+	voiceConn = vc
 	if err != nil {
-		zap.L().Sugar().Error("Parse bot request error", err)
-		return
+		return err
 	}
 
-	// Find the channel that the message came from.
-	c, err := s.State.Channel(m.ChannelID)
-	if err != nil {
-		zap.L().Sugar().Error("Couldn't find channel where the message came from", err)
-		return
-	}
+	playing = true
+	dgvoice.PlayAudioFile(vc, soundFile, stop)
+	playing = false
 
-	// Find the guild for that channel.
-	g, err := s.State.Guild(c.GuildID)
+	return nil
+}
+
+func PlayHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	options := i.ApplicationCommandData().Options
+	youtubeLink := options[0].Value.(string)
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: fmt.Sprintf("Downloading link: %s", youtubeLink),
+		},
+	})
+
+	g, err := s.State.Guild(i.GuildID)
 	if err != nil {
 		zap.L().Sugar().Error("Couldn't find channel guild", err)
+		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: "Couldn't join voice channel.",
+		})
 		return
 	}
 
-	// Look for the message sender in that guild's current voice states.
 	for _, vs := range g.VoiceStates {
-		if vs.UserID == m.Author.ID {
-			if strings.Contains(m.Content, "stop") {
-				vc, err := s.ChannelVoiceJoin(c.GuildID, vs.ChannelID, false, true)
-				if err != nil {
-					return
-				}
-
-				vc.Speaking(false)
-				vc.Disconnect()
+		if vs.UserID == i.Member.User.ID {
+			audioPath, err := youtube.DownloadAudio(youtubeLink)
+			if err != nil {
+				zap.L().Sugar().Error("Couldn't download video", err)
+				s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+					Content: "Couldn't download video.",
+				})
 				return
 			}
 
-			videoUrl := parseVideoUrlFromRequest(botRequest)
-			audioPath, err := youtube.DownloadAudio(videoUrl)
-			if err != nil {
-				zap.L().Sugar().Error("Couldn't download video", err)
+			if !playing {
+				go playSound(audioPath, s, g.ID, vs.ChannelID, stopPlaying)
 			}
-
-			err = PlaySound(audioPath, s, g.ID, vs.ChannelID)
-
-			if err != nil {
-				zap.L().Sugar().Error("Couldn't play sound", err)
-			}
-
-			return
+			// TODO: else send song to soundQueue
 		}
 	}
 }
 
-func PlaySound(soundFile string, s *discordgo.Session, guildID, channelID string) (err error) {
-	zap.L().Sugar().Infoln("VCs:", s.VoiceConnections)
-	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
-	if err != nil {
-		return err
+func StopHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	stopPlaying <- true
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "Playing stopped.",
+		},
+	})
+}
+
+func QuitHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	var quitResponse string
+
+	if !voiceConn.Ready {
+		quitResponse = "Not connected to voice"
+	} else {
+		quitResponse = "Bye-bye :("
+		voiceConn.Disconnect()
 	}
-	zap.L().Sugar().Infoln("VCs:", s.VoiceConnections)
 
-	vc.Speaking(true)
-	dgvoice.PlayAudioFile(vc, soundFile, make(chan bool))
-	vc.Speaking(false)
-	vc.Disconnect()
-
-	return nil
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: quitResponse,
+		},
+	})
 }
